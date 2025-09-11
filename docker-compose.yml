@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  playwright-browser:
+    build: .
+    container_name: playwright-browser
+    ports:
+      - "6080:6080"  # noVNC web interface
+      - "8931:8931"  # Playwright MCP HTTP/SSE endpoint
+    environment:
+      - DISPLAY=:99
+      - RESOLUTION=1920x1080
+    volumes:
+      - browser-data:/data
+      - chrome-downloads:/root/Downloads
+    restart: unless-stopped
+    shm_size: '2gb'  # Shared memory for Chrome
+    cap_add:
+      - SYS_ADMIN  # Required for Chrome sandbox in some cases
+    networks:
+      - playwright-net
+
+volumes:
+  browser-data:
+    driver: local
+  chrome-downloads:
+    driver: local
+
+networks:
+  playwright-net:
+    driver: bridge
