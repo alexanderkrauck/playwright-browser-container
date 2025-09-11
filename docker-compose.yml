@@ -11,7 +11,7 @@ services:
       - DISPLAY=:99
       - RESOLUTION=1920x1080
     volumes:
-      - browser-data:/data
+      - ./data:/data
       - chrome-downloads:/root/Downloads
     restart: unless-stopped
     shm_size: '2gb'  # Shared memory for Chrome
