@@ -78,7 +78,7 @@ log() {
     
     # Build phase
     log "Building Docker image..."
-    if docker-compose build --no-cache 2>&1 | tee -a "$LOG_FILE"; then
+    if docker-compose build 2>&1 | tee -a "$LOG_FILE"; then
         log "✓ Docker image built successfully"
     else
         log "✗ Docker build failed!"
