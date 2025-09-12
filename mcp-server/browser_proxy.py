@@ -16,7 +16,7 @@ from datetime import datetime
 
 from mcp.server import Server
 from mcp.server.streamable_http import StreamableHTTPServerTransport
-from mcp.types import Tool, TextContent
+from mcp.types import Tool, TextContent, ImageContent
 from playwright.async_api import async_playwright, Page, Browser
 
 class BrowserProxy:
@@ -175,17 +175,22 @@ class BrowserProxy:
             return result
             
         elif action == "screenshot":
+            import base64
+            
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             path = kwargs.get("path", f"screenshot_{timestamp}.png")
             full_page = kwargs.get("full_page", False)
             
             screenshot_data = await page.screenshot(full_page=full_page)
             
-            # Save to file
+            # Convert to base64 for ImageContent
+            base64_data = base64.b64encode(screenshot_data).decode('utf-8')
+            
+            # Also save to file for reference
             with open(path, "wb") as f:
                 f.write(screenshot_data)
             
-            return {"screenshot_saved": path, "size": len(screenshot_data)}
+            return {"base64": base64_data, "path": path, "size": len(screenshot_data)}
             
         elif action == "get_content":
             # Get the page's text content
@@ -291,7 +296,7 @@ Always operates on whatever tab the user is actually looking at.""",
             ]
         
         @self.app.call_tool()
-        async def call_tool(name: str, arguments: Any) -> Sequence[TextContent]:
+        async def call_tool(name: str, arguments: Any) -> Sequence[TextContent | ImageContent]:
             try:
                 if name == "browser_action":
                     action = arguments.get("action")
@@ -308,7 +313,12 @@ Always operates on whatever tab the user is actually looking at.""",
                     if action == "navigate":
                         return [TextContent(type="text", text=f"✓ Navigated to {result['navigated_to']}")]
                     elif action == "screenshot":
-                        return [TextContent(type="text", text=f"✓ Screenshot saved: {result['screenshot_saved']}")]
+                        # Return the screenshot as ImageContent
+                        return [ImageContent(
+                            type="image",
+                            data=result["base64"],
+                            mimeType="image/png"
+                        )]
                     elif action == "get_content":
                         content = result.get("content", "")
                         return [TextContent(type="text", text=f"Page content:\n{content}")]
