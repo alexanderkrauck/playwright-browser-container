@@ -18,6 +18,11 @@ mkdir -p /data/chrome-profile
 mkdir -p /root/Downloads
 mkdir -p /root/.playwright-browser-data
 
+# Clean up stale Chrome lock files from previous runs
+echo "Cleaning up stale Chrome lock files..."
+rm -f /data/chrome-profile/Singleton*
+rm -rf /tmp/.com.google.Chrome.*
+
 # Set proper permissions
 chmod -R 755 /var/log/supervisor
 chmod -R 755 /data
