@@ -12,6 +12,7 @@ services:
       - RESOLUTION=1920x1080
     volumes:
       - ./data:/data
+      - ./mcp-server:/mcp-server:ro
       - chrome-downloads:/root/Downloads
     restart: unless-stopped
     shm_size: '2gb'  # Shared memory for Chrome

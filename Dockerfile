@@ -22,6 +22,10 @@ RUN apt-get update && apt-get install -y \
     # Window management utilities
     xdotool \
     wmctrl \
+    # Python for our MCP server
+    python3 \
+    python3-pip \
+    python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js 20
@@ -39,6 +43,11 @@ RUN mkdir -p /data/chrome-profile \
 
 # Install Playwright browsers 
 RUN npx playwright install --with-deps chrome
+
+# Install Python MCP dependencies
+COPY mcp-server/requirements.txt /tmp/requirements.txt
+RUN pip3 install --break-system-packages --ignore-installed typing_extensions -r /tmp/requirements.txt \
+    && rm /tmp/requirements.txt
 
 
 # Copy configuration files
