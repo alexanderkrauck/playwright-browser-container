@@ -252,13 +252,18 @@ class BrowserProxy:
 
             # Execute Playwright script with page context
             try:
-                # Create a safe execution context with proper indentation
-                local_vars = {"page": page}
-                exec_code = f"""async def _exec():
-{chr(10).join('    ' + line for line in script.strip().split(chr(10)))}
-result = await _exec()"""
-                exec(exec_code, {"__builtins__": {}, "page": page}, local_vars)
-                result = local_vars.get('result')
+                # Create proper async execution context
+                indented_script = '\n'.join('    ' + line for line in script.strip().split('\n'))
+                exec_code = f"""
+async def _exec():
+{indented_script}
+
+import asyncio
+result = asyncio.create_task(_exec())
+"""
+                local_vars = {"page": page, "__builtins__": {"asyncio": __import__('asyncio')}}
+                exec(exec_code, {}, local_vars)
+                result = await local_vars['result']
                 return {"result": result, "executed": True}
             except Exception as e:
                 return {"error": f"Playwright script failed: {str(e)}"}
