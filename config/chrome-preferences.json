@@ -1,0 +1,21 @@
+{
+  "download": {
+    "default_directory": "/root/Downloads",
+    "prompt_for_download": false,
+    "directory_upgrade": true,
+    "extensions_to_open": "",
+    "ask_for_save_path": false
+  },
+  "savefile": {
+    "default_directory": "/root/Downloads",
+    "prompt_for_download": false
+  },
+  "download_bubble": {
+    "partial_view_enabled": false
+  },
+  "profile": {
+    "default_content_settings": {
+      "automatic_downloads": 1
+    }
+  }
+}
