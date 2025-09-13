@@ -240,9 +240,9 @@ class BrowserProxy:
                     
 Actions:
 - navigate: Go to a URL
-- evaluate: Run JavaScript and return result  
+- evaluate: Run JavaScript and return result
 - screenshot: Capture the page
-- get_content: Get page text content
+- get_content: Get basic page text content (document.body.innerText, limited to 5000 chars). For targeted extraction of specific elements, interactive elements, or comprehensive data collection, use 'evaluate' with custom JavaScript instead.
 - click: Click an element
 - fill: Fill a form field
 - wait: Wait for timeout
