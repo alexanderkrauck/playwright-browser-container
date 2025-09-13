@@ -56,7 +56,7 @@ class BrowserProxy:
         
         return self.browser
     
-    async def smart_click(self, page: Page, target: str) -> Dict:
+i    async def smart_click(self, page: Page, target: str) -> Dict:
         """Click by text or CSS selector using trusted mouse events with auto-scrolling"""
         # CSS selector detection
         if target.startswith(('#', '.', '[')) or ' > ' in target or target.startswith('div[') or target.startswith('button['):
@@ -362,21 +362,32 @@ class BrowserProxy:
 
             # Execute Playwright script with page context
             try:
-                # Create proper async execution context
-                indented_script = '\n'.join('    ' + line for line in script.strip().split('\n'))
-                exec_code = f"""
-async def _exec():
-{indented_script}
-
-import asyncio
-result = asyncio.create_task(_exec())
-"""
-                # Provide full builtins and necessary imports
+                # Create a proper async function and execute it
                 import asyncio
-                local_vars = {"page": page, "asyncio": asyncio}
-                global_vars = {"page": page, "asyncio": asyncio, "__builtins__": __builtins__}
-                exec(exec_code, global_vars, local_vars)
-                result = await local_vars['result']
+
+                # Clean up the script and create function body
+                script_lines = script.strip().split('\n')
+                indented_lines = []
+                for line in script_lines:
+                    # Only indent non-empty lines
+                    if line.strip():
+                        indented_lines.append('    ' + line.strip())
+                    else:
+                        indented_lines.append('')
+
+                # Build the complete async function
+                func_code = f"""
+async def _playwright_exec():
+{chr(10).join(indented_lines)}
+"""
+
+                # Execute the function definition
+                local_vars = {"page": page}
+                global_vars = {"page": page, "__builtins__": __builtins__}
+                exec(func_code, global_vars, local_vars)
+
+                # Call the function and get result
+                result = await local_vars['_playwright_exec']()
                 return {"result": result, "executed": True}
             except Exception as e:
                 return {"error": f"Playwright script failed: {str(e)}"}
@@ -457,11 +468,11 @@ result = asyncio.create_task(_exec())
                 ),
                 Tool(
                     name="browser_playwright",
-                    description="Execute advanced Playwright API commands with access to page object",
+                    description="Execute advanced Playwright API commands with access to page object. Supports both single-line and multiline scripts. Examples: Single-line: 'await page.mouse.wheel(0, 300)' or multiline with newlines: 'await page.mouse.move(800, 400)\\nawait page.mouse.wheel(0, 300)\\nreturn \"scrolled\"'",
                     inputSchema={
                         "type": "object",
                         "properties": {
-                            "script": {"type": "string", "description": "Playwright script to execute (has access to 'page' object)"}
+                            "script": {"type": "string", "description": "Playwright script to execute (has access to 'page' object). Can be single-line or multiline. Each line should be valid JavaScript/Playwright API calls."}
                         },
                         "required": ["script"]
                     }
