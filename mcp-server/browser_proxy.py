@@ -57,7 +57,7 @@ class BrowserProxy:
         return self.browser
     
     async def smart_click(self, page: Page, target: str) -> Dict:
-        """Click by text or CSS selector using trusted mouse events with auto-scrolling"""
+        """Click by text or CSS selector with iframe support and smart element selection"""
         # CSS selector detection
         if target.startswith(('#', '.', '[')) or ' > ' in target or target.startswith('div[') or target.startswith('button['):
             try:
@@ -66,118 +66,83 @@ class BrowserProxy:
             except Exception as e:
                 return {"error": f"Could not click {target}: {str(e)}"}
 
-        # Text-based clicking with trusted mouse events and auto-scrolling
+        # Enhanced text-based clicking with iframe support
         try:
-            # Enhanced search with viewport checking and auto-scroll
+            # Search in main document AND all accessible iframes
             result = await page.evaluate(f"""
                 (targetText) => {{
-                    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
-                    let node;
-                    let bestMatch = null;
+                    const findInDocument = (doc, frameName = 'main') => {{
+                        const matches = [];
+                        const walker = document.createTreeWalker(doc.body || doc.documentElement, NodeFilter.SHOW_TEXT, null, false);
+                        let node;
 
-                    while (node = walker.nextNode()) {{
-                        const text = node.textContent.trim();
-                        if (text === targetText || text.includes(targetText)) {{
-                            const element = node.parentElement;
-                            if (!element) continue;
+                        while (node = walker.nextNode()) {{
+                            const text = node.textContent.trim();
+                            if (text === targetText || text.includes(targetText)) {{
+                                const element = node.parentElement;
+                                if (!element) continue;
 
-                            const range = document.createRange();
-                            range.selectNodeContents(node);
-                            const rect = range.getBoundingClientRect();
+                                const range = document.createRange();
+                                range.selectNodeContents(node);
+                                const rect = range.getBoundingClientRect();
 
-                            if (rect.width > 0 && rect.height > 0) {{
-                                // Check if element is in viewport
-                                const isVisible = rect.top >= 0 &&
-                                                rect.left >= 0 &&
-                                                rect.bottom <= window.innerHeight &&
-                                                rect.right <= window.innerWidth;
+                                if (rect.width > 0 && rect.height > 0) {{
+                                    const isVisible = rect.top >= 0 && rect.left >= 0 &&
+                                                    rect.bottom <= window.innerHeight && rect.right <= window.innerWidth;
 
-                                const match = {{
-                                    x: rect.left + rect.width / 2,
-                                    y: rect.top + rect.height / 2,
-                                    element: element,
-                                    visible: isVisible,
-                                    found: true
-                                }};
+                                    // Score elements: exact match + visible + interactive elements get priority
+                                    let score = 0;
+                                    if (text === targetText) score += 100;  // Exact match bonus
+                                    if (isVisible) score += 50;  // Visibility bonus
+                                    if (element.tagName.match(/BUTTON|A|SPAN/) && element.className.includes('menu')) score += 30;  // Menu item bonus
+                                    if (element.onclick || element.getAttribute('role') === 'button') score += 20;  // Interactive bonus
 
-                                // If visible, use immediately
-                                if (isVisible) {{
-                                    return match;
-                                }}
-
-                                // Otherwise, store as potential match
-                                if (!bestMatch) {{
-                                    bestMatch = match;
+                                    matches.push({{
+                                        x: Math.round(rect.left + rect.width / 2),
+                                        y: Math.round(rect.top + rect.height / 2),
+                                        score: score,
+                                        visible: isVisible,
+                                        text: text,
+                                        frame: frameName,
+                                        found: true
+                                    }});
                                 }}
                             }}
                         }}
-                    }}
+                        return matches;
+                    }};
 
-                    return bestMatch || {{ found: false }};
+                    // Search main document
+                    let allMatches = findInDocument(document, 'main');
+
+                    // Search all accessible iframes
+                    document.querySelectorAll('iframe').forEach((iframe, index) => {{
+                        try {{
+                            if (iframe.contentDocument) {{
+                                allMatches.push(...findInDocument(iframe.contentDocument, `iframe_${{index}}`));
+                            }}
+                        }} catch (e) {{
+                            // Cross-origin iframe, skip
+                        }}
+                    }});
+
+                    if (allMatches.length === 0) return {{ found: false }};
+
+                    // Sort by score (highest first) and return best match
+                    allMatches.sort((a, b) => b.score - a.score);
+                    return allMatches[0];
                 }}
             """, target)
 
             if result.get('found'):
-                # If element is visible, click directly
-                if result.get('visible'):
-                    await page.mouse.click(result['x'], result['y'])
-                    return {"clicked": target, "method": "trusted_mouse_click", "coordinates": {"x": result['x'], "y": result['y']}}
-
-                # If not visible, scroll into view first
-                else:
-                    scroll_result = await page.evaluate(f"""
-                        (targetText) => {{
-                            const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
-                            let node;
-
-                            while (node = walker.nextNode()) {{
-                                const text = node.textContent.trim();
-                                if (text === targetText || text.includes(targetText)) {{
-                                    const element = node.parentElement;
-                                    if (element) {{
-                                        // Scroll element into view
-                                        element.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
-                                        return {{ scrolled: true }};
-                                    }}
-                                }}
-                            }}
-                            return {{ scrolled: false }};
-                        }}
-                    """, target)
-
-                    if scroll_result.get('scrolled'):
-                        # Wait for scroll animation to complete
-                        await page.wait_for_timeout(500)
-
-                        # Now get new coordinates after scrolling
-                        new_result = await page.evaluate(f"""
-                            (targetText) => {{
-                                const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
-                                let node;
-
-                                while (node = walker.nextNode()) {{
-                                    const text = node.textContent.trim();
-                                    if (text === targetText || text.includes(targetText)) {{
-                                        const range = document.createRange();
-                                        range.selectNodeContents(node);
-                                        const rect = range.getBoundingClientRect();
-
-                                        if (rect.width > 0 && rect.height > 0) {{
-                                            return {{
-                                                x: rect.left + rect.width / 2,
-                                                y: rect.top + rect.height / 2,
-                                                found: true
-                                            }};
-                                        }}
-                                    }}
-                                }}
-                                return {{ found: false }};
-                            }}
-                        """, target)
-
-                        if new_result.get('found'):
-                            await page.mouse.click(new_result['x'], new_result['y'])
-                            return {"clicked": target, "method": "scroll_then_click", "coordinates": {"x": new_result['x'], "y": new_result['y']}}
+                await page.mouse.click(result['x'], result['y'])
+                return {
+                    "clicked": target,
+                    "method": "enhanced_smart_click",
+                    "coordinates": {"x": result['x'], "y": result['y']},
+                    "score": result.get('score', 0),
+                    "frame": result.get('frame', 'main')
+                }
 
             return {"error": f"Could not find text: '{target}'"}
 
