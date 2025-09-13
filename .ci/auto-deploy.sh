@@ -89,6 +89,15 @@ log() {
     if [ -n "$OLD_CONTAINER" ]; then
         log "Stopping old container: $OLD_CONTAINER"
         docker-compose down 2>&1 | tee -a "$LOG_FILE"
+
+        # Force remove container if it still exists
+        if docker ps -aq -f name="^${CONTAINER_NAME}$" > /dev/null 2>&1; then
+            log "Force removing container: $CONTAINER_NAME"
+            docker rm -f "$CONTAINER_NAME" 2>&1 | tee -a "$LOG_FILE"
+        fi
+
+        # Wait for cleanup to complete
+        sleep 2
         log "✓ Old container stopped"
     else
         log "No existing container found"
