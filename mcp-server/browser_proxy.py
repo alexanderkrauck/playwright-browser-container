@@ -362,32 +362,26 @@ class BrowserProxy:
 
             # Execute Playwright script with page context
             try:
-                # Create a proper async function and execute it
-                import asyncio
-
-                # Clean up the script and create function body
-                script_lines = script.strip().split('\n')
-                indented_lines = []
-                for line in script_lines:
-                    # Only indent non-empty lines
-                    if line.strip():
-                        indented_lines.append('    ' + line.strip())
-                    else:
-                        indented_lines.append('')
-
-                # Build the complete async function
-                func_code = f"""
-async def _playwright_exec():
-{chr(10).join(indented_lines)}
+                # Parse the script to determine if it's using Playwright API calls or JavaScript
+                # If it contains "await page." it's likely Playwright Python API calls
+                if "await page." in script:
+                    # Execute as Python Playwright API calls
+                    namespace = {'page': page}
+                    exec_code = f"""
+async def _exec_playwright():
+{chr(10).join('    ' + line if line.strip() else '' for line in script.strip().split(chr(10)))}
 """
+                    exec(exec_code, namespace)
+                    result = await namespace['_exec_playwright']()
+                else:
+                    # Execute as JavaScript in the browser context
+                    js_code = f"""
+(async () => {{
+    {script}
+}})()
+"""
+                    result = await page.evaluate(js_code)
 
-                # Execute the function definition
-                local_vars = {"page": page}
-                global_vars = {"page": page, "__builtins__": __builtins__}
-                exec(func_code, global_vars, local_vars)
-
-                # Call the function and get result
-                result = await local_vars['_playwright_exec']()
                 return {"result": result, "executed": True}
             except Exception as e:
                 return {"error": f"Playwright script failed: {str(e)}"}
@@ -468,11 +462,11 @@ async def _playwright_exec():
                 ),
                 Tool(
                     name="browser_playwright",
-                    description="Execute advanced Playwright API commands with access to page object. Supports both single-line and multiline scripts. Examples: Single-line: 'await page.mouse.wheel(0, 300)' or multiline with newlines: 'await page.mouse.move(800, 400)\\nawait page.mouse.wheel(0, 300)\\nreturn \"scrolled\"'",
+                    description="Execute advanced Playwright API commands or JavaScript code. For Playwright API: 'await page.mouse.wheel(0, 300)'. For JavaScript: 'return document.title' or 'const links = document.querySelectorAll(\"a\"); return links.length'",
                     inputSchema={
                         "type": "object",
                         "properties": {
-                            "script": {"type": "string", "description": "Playwright script to execute (has access to 'page' object). Can be single-line or multiline. Each line should be valid JavaScript/Playwright API calls."}
+                            "script": {"type": "string", "description": "Script to execute. Use 'await page.*' for Playwright API calls, or write JavaScript code to run in browser context."}
                         },
                         "required": ["script"]
                     }
