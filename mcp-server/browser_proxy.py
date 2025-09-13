@@ -56,7 +56,7 @@ class BrowserProxy:
         
         return self.browser
     
-i    async def smart_click(self, page: Page, target: str) -> Dict:
+    async def smart_click(self, page: Page, target: str) -> Dict:
         """Click by text or CSS selector using trusted mouse events with auto-scrolling"""
         # CSS selector detection
         if target.startswith(('#', '.', '[')) or ' > ' in target or target.startswith('div[') or target.startswith('button['):
