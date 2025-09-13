@@ -362,25 +362,18 @@ class BrowserProxy:
 
             # Execute Playwright script with page context
             try:
-                # Parse the script to determine if it's using Playwright API calls or JavaScript
-                # If it contains "await page." it's likely Playwright Python API calls
-                if "await page." in script:
-                    # Execute as Python Playwright API calls
-                    namespace = {'page': page}
-                    exec_code = f"""
+                # This tool is exclusively for Playwright Python API calls
+                if "await page." not in script:
+                    raise ValueError("This tool is for Playwright API commands only. Use 'await page.*' syntax. For JavaScript execution, use browser_evaluate instead.")
+
+                # Execute as Python Playwright API calls
+                namespace = {'page': page}
+                exec_code = f"""
 async def _exec_playwright():
 {chr(10).join('    ' + line if line.strip() else '' for line in script.strip().split(chr(10)))}
 """
-                    exec(exec_code, namespace)
-                    result = await namespace['_exec_playwright']()
-                else:
-                    # Execute as JavaScript in the browser context
-                    js_code = f"""
-(async () => {{
-    {script}
-}})()
-"""
-                    result = await page.evaluate(js_code)
+                exec(exec_code, namespace)
+                result = await namespace['_exec_playwright']()
 
                 return {"result": result, "executed": True}
             except Exception as e:
@@ -410,11 +403,11 @@ async def _exec_playwright():
                 ),
                 Tool(
                     name="browser_evaluate",
-                    description="Run JavaScript on the currently active tab and return the result",
+                    description="Execute JavaScript code in the browser context. For running any JavaScript: simple expressions ('document.title'), complex async functions ('(async () => { await fetch(...); return data; })()'), DOM manipulation, or multi-line scripts. This is your go-to tool for JavaScript execution.",
                     inputSchema={
                         "type": "object",
                         "properties": {
-                            "expression": {"type": "string", "description": "JavaScript expression to evaluate"}
+                            "expression": {"type": "string", "description": "JavaScript code to execute. Can be simple expressions or complex async IIFEs. Examples: 'document.title' or '(async () => { const result = await fetch(...); return result; })()'"}
                         },
                         "required": ["expression"]
                     }
@@ -462,11 +455,11 @@ async def _exec_playwright():
                 ),
                 Tool(
                     name="browser_playwright",
-                    description="Execute advanced Playwright API commands or JavaScript code. For Playwright API: 'await page.mouse.wheel(0, 300)'. For JavaScript: 'return document.title' or 'const links = document.querySelectorAll(\"a\"); return links.length'",
+                    description="Execute Playwright Python API commands directly. This is exclusively for automation tasks that need Playwright's API like 'await page.mouse.wheel(0, 300)', 'await page.wait_for_timeout(500)', 'await page.keyboard.press(\"Enter\")', 'await page.hover(\"#element\")'. For JavaScript execution, use browser_evaluate instead.",
                     inputSchema={
                         "type": "object",
                         "properties": {
-                            "script": {"type": "string", "description": "Script to execute. Use 'await page.*' for Playwright API calls, or write JavaScript code to run in browser context."}
+                            "script": {"type": "string", "description": "Playwright Python API commands. Must use 'await page.*' for browser automation (mouse, keyboard, waits, etc). Variables need '=' assignment. Returns must use 'return' statement. For pure JavaScript, use browser_evaluate."}
                         },
                         "required": ["script"]
                     }
