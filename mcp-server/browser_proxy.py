@@ -11,8 +11,10 @@ import os
 import json
 import logging
 import asyncio
-from typing import Any, Optional, Sequence
+import re
+from typing import Any, Optional, Sequence, List, Dict
 from datetime import datetime
+from difflib import SequenceMatcher
 
 from mcp.server import Server
 from mcp.server.streamable_http import StreamableHTTPServerTransport
@@ -54,6 +56,63 @@ class BrowserProxy:
         
         return self.browser
     
+    async def smart_click(self, page: Page, target: str, fuzzy_threshold: float = 0.8) -> Dict:
+        """Simple text-first click with fallback to CSS selectors"""
+
+        # If it looks like CSS selector, use old method
+        if target.startswith(('#', '.', '[')) or ':' in target:
+            try:
+                await page.click(target, timeout=5000)
+                return {"clicked": target, "method": "css_selector"}
+            except Exception as e:
+                return {"error": f"Could not click {target}: {str(e)}"}
+
+        # Otherwise, treat as text and try our successful selectors
+        escaped_text = target.replace('"', '\\"')
+        selectors = [
+            f'div[tabindex="0"]:has-text("{escaped_text}")',  # This worked for WhatsApp
+            f'li:has-text("{escaped_text}")',                # This worked for LinkedIn
+            f'*:has-text("{escaped_text}")',                 # General fallback
+            f'[role="button"]:has-text("{escaped_text}")',
+            f'button:has-text("{escaped_text}")',
+            f'a:has-text("{escaped_text}")'
+        ]
+
+        for selector in selectors:
+            try:
+                await page.click(selector, timeout=2000)
+                return {"clicked": target, "method": "text_to_selector", "selector": selector}
+            except:
+                continue
+
+        # Final fallback: find any element with the text and click it
+        try:
+            result = await page.evaluate(f"""
+                () => {{
+                    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+                    let node;
+                    while (node = walker.nextNode()) {{
+                        const text = node.textContent.trim().toLowerCase();
+                        if (text.includes("{target.lower()}")) {{
+                            const element = node.parentElement;
+                            if (element.offsetWidth > 0 && element.offsetHeight > 0) {{
+                                element.click();
+                                return true;
+                            }}
+                        }}
+                    }}
+                    return false;
+                }}
+            """)
+
+            if result:
+                return {"clicked": target, "method": "text_search"}
+            else:
+                return {"error": f"No clickable element found with text '{target}'"}
+
+        except Exception as e:
+            return {"error": f"Click failed: {str(e)}"}
+
     async def get_active_page(self) -> Page:
         """
         Get the ACTUALLY active page/tab right now.
@@ -200,17 +259,12 @@ class BrowserProxy:
             return {"content": content[:5000]}  # Limit to first 5000 chars
             
         elif action == "click":
-            selector = kwargs.get("selector")
-            if not selector:
-                raise ValueError("Selector required for click")
-            
-            # Try to click, with error handling
-            try:
-                await page.click(selector, timeout=5000)
-                return {"clicked": selector}
-            except Exception as e:
-                # Element might not exist
-                return {"error": f"Could not click {selector}: {str(e)}"}
+            target = kwargs.get("target") or kwargs.get("selector")  # Support both for compatibility
+            if not target:
+                raise ValueError("Target text or selector required for click")
+
+            fuzzy_threshold = kwargs.get("fuzzy_threshold", 0.8)
+            return await self.smart_click(page, target, fuzzy_threshold)
                 
         elif action == "fill":
             selector = kwargs.get("selector")
@@ -237,13 +291,13 @@ class BrowserProxy:
                 Tool(
                     name="browser_action",
                     description="""Execute action on the CURRENTLY ACTIVE tab.
-                    
+
 Actions:
 - navigate: Go to a URL
 - evaluate: Run JavaScript and return result
 - screenshot: Capture the page
 - get_content: Get basic page text content (document.body.innerText, limited to 5000 chars). For targeted extraction of specific elements, interactive elements, or comprehensive data collection, use 'evaluate' with custom JavaScript instead.
-- click: Click an element
+- click: Click an element by text content (fuzzy matched) or CSS selector
 - fill: Fill a form field
 - wait: Wait for timeout
 
@@ -258,8 +312,10 @@ Always operates on whatever tab the user is actually looking at.""",
                             },
                             "url": {"type": "string", "description": "URL for navigate"},
                             "expression": {"type": "string", "description": "JavaScript for evaluate"},
-                            "selector": {"type": "string", "description": "CSS selector for click/fill"},
+                            "target": {"type": "string", "description": "Text to click (fuzzy matched) or CSS selector"},
+                            "selector": {"type": "string", "description": "CSS selector (for fill, or click fallback)"},
                             "value": {"type": "string", "description": "Value for fill"},
+                            "fuzzy_threshold": {"type": "number", "description": "Fuzzy match threshold 0-1", "default": 0.8},
                             "full_page": {"type": "boolean", "description": "Full page screenshot", "default": False},
                             "timeout": {"type": "integer", "description": "Timeout in ms for wait", "default": 3000}
                         },
