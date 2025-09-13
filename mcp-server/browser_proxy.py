@@ -241,9 +241,23 @@ class BrowserProxy:
             value = kwargs.get("value")
             if not selector or value is None:
                 raise ValueError("Selector and value required for fill")
-            
+
             await page.fill(selector, value)
             return {"filled": selector, "value": value}
+
+        elif action == "playwright":
+            script = kwargs.get("script")
+            if not script:
+                raise ValueError("Playwright script required")
+
+            # Execute Playwright script with page context
+            try:
+                # Create a safe execution context
+                local_vars = {"page": page}
+                result = await eval(f"async def _exec(): {script}\n_exec()", {"__builtins__": {}, "page": page}, local_vars)()
+                return {"result": result, "executed": True}
+            except Exception as e:
+                return {"error": f"Playwright script failed: {str(e)}"}
             
             
         else:
@@ -265,6 +279,7 @@ Actions:
 - get_content: Get basic page text content (document.body.innerText, limited to 5000 chars). For targeted extraction of specific elements, interactive elements, or comprehensive data collection, use 'evaluate' with custom JavaScript instead.
 - click: Click an element by text content or CSS selector (auto-detected)
 - fill: Fill a form field
+- playwright: Execute Playwright API commands (advanced - has access to 'page' object)
 
 Always operates on whatever tab the user is actually looking at.""",
                     inputSchema={
@@ -272,7 +287,7 @@ Always operates on whatever tab the user is actually looking at.""",
                         "properties": {
                             "action": {
                                 "type": "string",
-                                "enum": ["navigate", "evaluate", "screenshot", "get_content", "click", "fill"],
+                                "enum": ["navigate", "evaluate", "screenshot", "get_content", "click", "fill", "playwright"],
                                 "description": "Action to perform"
                             },
                             "url": {"type": "string", "description": "URL for navigate"},
@@ -280,6 +295,7 @@ Always operates on whatever tab the user is actually looking at.""",
                             "target": {"type": "string", "description": "Text to click or CSS selector"},
                             "selector": {"type": "string", "description": "CSS selector for fill"},
                             "value": {"type": "string", "description": "Value for fill"},
+                            "script": {"type": "string", "description": "Playwright script to execute (has access to 'page' object)"},
                             "full_page": {"type": "boolean", "description": "Full page screenshot", "default": False}
                         },
                         "required": ["action"]
