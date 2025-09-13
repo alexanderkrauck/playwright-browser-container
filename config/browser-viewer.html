@@ -83,12 +83,14 @@
             
             try {
                 rfb = new RFB(document.getElementById('screen'), url);
-                rfb.scaleViewport = false;  // Don't auto-scale
+                // Scale the remote 1920x1080 desktop to fit the viewer while
+                // keeping the remote session at Full HD resolution.
+                rfb.scaleViewport = true;
                 rfb.resizeSession = false;
                 rfb.showDotCursor = true;
                 rfb.viewOnly = false;
-                rfb.clipViewport = false;  // Show full remote desktop
-                rfb.dragViewport = true;   // Allow dragging to pan
+                rfb.clipViewport = true;   // Fit within viewport bounds
+                rfb.dragViewport = false;  // No need to pan when scaling
                 rfb.addEventListener('connect', connected);
                 rfb.addEventListener('disconnect', disconnected);
             } catch (err) {
