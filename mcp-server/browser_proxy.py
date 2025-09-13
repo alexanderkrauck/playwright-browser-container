@@ -261,8 +261,9 @@ async def _exec():
 import asyncio
 result = asyncio.create_task(_exec())
 """
-                local_vars = {"page": page, "__builtins__": {"asyncio": __import__('asyncio')}}
-                exec(exec_code, {}, local_vars)
+                local_vars = {"page": page}
+                global_vars = {"page": page, "__builtins__": {"asyncio": __import__('asyncio')}}
+                exec(exec_code, global_vars, local_vars)
                 result = await local_vars['result']
                 return {"result": result, "executed": True}
             except Exception as e:
