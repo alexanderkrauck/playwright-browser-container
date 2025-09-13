@@ -205,8 +205,18 @@ class BrowserProxy:
             url = kwargs.get("url")
             if not url:
                 raise ValueError("URL required for navigate")
-            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-            return {"navigated_to": url}
+
+            # Custom wait conditions and timeout
+            wait_until = kwargs.get("wait_until", "domcontentloaded")
+            timeout = kwargs.get("timeout", 30000)
+
+            # Validate wait_until parameter
+            valid_wait_conditions = ["load", "domcontentloaded", "networkidle", "commit"]
+            if wait_until not in valid_wait_conditions:
+                raise ValueError(f"Invalid wait_until: {wait_until}. Must be one of: {valid_wait_conditions}")
+
+            await page.goto(url, wait_until=wait_until, timeout=timeout)
+            return {"navigated_to": url, "wait_until": wait_until, "timeout": timeout}
             
         elif action == "evaluate":
             expression = kwargs.get("expression")
@@ -289,39 +299,82 @@ result = asyncio.create_task(_exec())
     def setup_handlers(self):
         @self.app.list_tools()
         async def list_tools() -> list[Tool]:
-            """Only essential tools - no bloat"""
+            """Individual browser tools for better organization"""
             return [
                 Tool(
-                    name="browser_action",
-                    description="""Execute action on the CURRENTLY ACTIVE tab.
-
-Actions:
-- navigate: Go to a URL
-- evaluate: Run JavaScript and return result
-- screenshot: Capture the page
-- get_content: Get basic page text content (document.body.innerText, limited to 5000 chars). For targeted extraction of specific elements, interactive elements, or comprehensive data collection, use 'evaluate' with custom JavaScript instead.
-- click: Click an element by text content or CSS selector (auto-detected)
-- fill: Fill a form field
-- playwright: Execute Playwright API commands (advanced - has access to 'page' object)
-
-Always operates on whatever tab the user is actually looking at.""",
+                    name="browser_navigate",
+                    description="Navigate to a URL on the currently active tab",
                     inputSchema={
                         "type": "object",
                         "properties": {
-                            "action": {
-                                "type": "string",
-                                "enum": ["navigate", "evaluate", "screenshot", "get_content", "click", "fill", "playwright"],
-                                "description": "Action to perform"
-                            },
-                            "url": {"type": "string", "description": "URL for navigate"},
-                            "expression": {"type": "string", "description": "JavaScript for evaluate"},
-                            "target": {"type": "string", "description": "Text to click or CSS selector"},
-                            "selector": {"type": "string", "description": "CSS selector for fill"},
-                            "value": {"type": "string", "description": "Value for fill"},
-                            "script": {"type": "string", "description": "Playwright script to execute (has access to 'page' object)"},
-                            "full_page": {"type": "boolean", "description": "Full page screenshot", "default": False}
+                            "url": {"type": "string", "description": "URL to navigate to"},
+                            "wait_until": {"type": "string", "enum": ["load", "domcontentloaded", "networkidle", "commit"], "description": "When to consider navigation complete (default: domcontentloaded)"},
+                            "timeout": {"type": "integer", "description": "Navigation timeout in milliseconds (default: 30000)"}
                         },
-                        "required": ["action"]
+                        "required": ["url"]
+                    }
+                ),
+                Tool(
+                    name="browser_evaluate",
+                    description="Run JavaScript on the currently active tab and return the result",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "expression": {"type": "string", "description": "JavaScript expression to evaluate"}
+                        },
+                        "required": ["expression"]
+                    }
+                ),
+                Tool(
+                    name="browser_screenshot",
+                    description="Take a screenshot of the currently active tab",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "full_page": {"type": "boolean", "description": "Capture full page or just viewport (default: false)"}
+                        }
+                    }
+                ),
+                Tool(
+                    name="browser_get_content",
+                    description="Get basic page text content (document.body.innerText, limited to 5000 chars)",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {}
+                    }
+                ),
+                Tool(
+                    name="browser_click",
+                    description="Click an element by text content or CSS selector using trusted mouse events",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "target": {"type": "string", "description": "Text to click or CSS selector"}
+                        },
+                        "required": ["target"]
+                    }
+                ),
+                Tool(
+                    name="browser_fill",
+                    description="Fill a form field on the currently active tab",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "selector": {"type": "string", "description": "CSS selector for the input field"},
+                            "value": {"type": "string", "description": "Value to fill"}
+                        },
+                        "required": ["selector", "value"]
+                    }
+                ),
+                Tool(
+                    name="browser_playwright",
+                    description="Execute advanced Playwright API commands with access to page object",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "script": {"type": "string", "description": "Playwright script to execute (has access to 'page' object)"}
+                        },
+                        "required": ["script"]
                     }
                 ),
                 Tool(
@@ -356,33 +409,40 @@ Always operates on whatever tab the user is actually looking at.""",
         @self.app.call_tool()
         async def call_tool(name: str, arguments: Any) -> Sequence[TextContent | ImageContent]:
             try:
-                if name == "browser_action":
-                    action = arguments.get("action")
-                    if not action:
-                        return [TextContent(type="text", text="ERROR: action is required")]
-                    
-                    # Remove 'action' from arguments before passing as kwargs
-                    kwargs = {k: v for k, v in arguments.items() if k != "action"}
-                    
-                    # Execute on whatever tab is active RIGHT NOW
-                    result = await self.execute_on_active_tab(action, **kwargs)
-                    
-                    # Format result nicely
-                    if action == "navigate":
-                        return [TextContent(type="text", text=f"✓ Navigated to {result['navigated_to']}")]
-                    elif action == "screenshot":
-                        # Return the screenshot as ImageContent
-                        return [ImageContent(
-                            type="image",
-                            data=result["base64"],
-                            mimeType="image/png"
-                        )]
-                    elif action == "get_content":
-                        content = result.get("content", "")
-                        return [TextContent(type="text", text=f"Page content:\n{content}")]
-                    else:
-                        return [TextContent(type="text", text=json.dumps(result, indent=2))]
-                
+                # Individual browser tools
+                if name == "browser_navigate":
+                    result = await self.execute_on_active_tab("navigate", **arguments)
+                    return [TextContent(type="text", text=f"✓ Navigated to {result['navigated_to']}")]
+
+                elif name == "browser_evaluate":
+                    result = await self.execute_on_active_tab("evaluate", **arguments)
+                    return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+                elif name == "browser_screenshot":
+                    result = await self.execute_on_active_tab("screenshot", **arguments)
+                    return [ImageContent(
+                        type="image",
+                        data=result["base64"],
+                        mimeType="image/png"
+                    )]
+
+                elif name == "browser_get_content":
+                    result = await self.execute_on_active_tab("get_content", **arguments)
+                    content = result.get("content", "")
+                    return [TextContent(type="text", text=f"Page content:\n{content}")]
+
+                elif name == "browser_click":
+                    result = await self.execute_on_active_tab("click", **arguments)
+                    return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+                elif name == "browser_fill":
+                    result = await self.execute_on_active_tab("fill", **arguments)
+                    return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+                elif name == "browser_playwright":
+                    result = await self.execute_on_active_tab("playwright", **arguments)
+                    return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
                 elif name == "browser_tabs":
                     action = arguments.get("action", "list")
                     
