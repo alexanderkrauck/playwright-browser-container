@@ -57,32 +57,43 @@ class BrowserProxy:
         return self.browser
     
     async def smart_click(self, page: Page, target: str) -> Dict:
-        """Click by text or CSS selector - auto-detected"""
-
+        """Click by text or CSS selector using trusted mouse events"""
         # CSS selector detection
         if target.startswith(('#', '.', '[')) or ' > ' in target or target.startswith('div[') or target.startswith('button['):
             try:
                 await page.click(target, timeout=5000)
-                return {"clicked": target}
+                return {"clicked": target, "method": "css_selector"}
             except Exception as e:
                 return {"error": f"Could not click {target}: {str(e)}"}
 
-        # Text-based clicking - try proven selectors
-        escaped_text = target.replace('"', '\\"')
-        selectors = [
-            f'div[tabindex="0"]:has-text("{escaped_text}")',  # WhatsApp chats
-            f'li:has-text("{escaped_text}")',                # LinkedIn conversations
-            f'*:has-text("{escaped_text}")',                 # General fallback
-        ]
+        # Text-based clicking with trusted mouse events
+        try:
+            result = await page.evaluate(f"""
+                (targetText) => {{
+                    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+                    let node;
+                    while (node = walker.nextNode()) {{
+                        const text = node.textContent.trim();
+                        if (text === targetText || text.includes(targetText)) {{
+                            const range = document.createRange();
+                            range.selectNodeContents(node);
+                            const rect = range.getBoundingClientRect();
+                            if (rect.width > 0 && rect.height > 0) {{
+                                return {{ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, found: true }};
+                            }}
+                        }}
+                    }}
+                    return {{ found: false }};
+                }}
+            """, target)
 
-        for selector in selectors:
-            try:
-                await page.click(selector, timeout=2000)
-                return {"clicked": target}
-            except:
-                continue
-
-        return {"error": f"Could not find clickable element: '{target}'"}
+            if result.get('found'):
+                await page.mouse.click(result['x'], result['y'])
+                return {"clicked": target, "method": "trusted_mouse_click", "coordinates": {"x": result['x'], "y": result['y']}}
+            else:
+                return {"error": f"Could not find text: '{target}'"}
+        except Exception as e:
+            return {"error": f"Click failed: {str(e)}"}
 
     async def get_active_page(self) -> Page:
         """
