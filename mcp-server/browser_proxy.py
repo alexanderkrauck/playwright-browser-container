@@ -57,7 +57,7 @@ class BrowserProxy:
         return self.browser
     
     async def smart_click(self, page: Page, target: str) -> Dict:
-        """Click by text or CSS selector using trusted mouse events"""
+        """Click by text or CSS selector using trusted mouse events with auto-scrolling"""
         # CSS selector detection
         if target.startswith(('#', '.', '[')) or ' > ' in target or target.startswith('div[') or target.startswith('button['):
             try:
@@ -66,32 +66,121 @@ class BrowserProxy:
             except Exception as e:
                 return {"error": f"Could not click {target}: {str(e)}"}
 
-        # Text-based clicking with trusted mouse events
+        # Text-based clicking with trusted mouse events and auto-scrolling
         try:
+            # Enhanced search with viewport checking and auto-scroll
             result = await page.evaluate(f"""
                 (targetText) => {{
                     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
                     let node;
+                    let bestMatch = null;
+
                     while (node = walker.nextNode()) {{
                         const text = node.textContent.trim();
                         if (text === targetText || text.includes(targetText)) {{
+                            const element = node.parentElement;
+                            if (!element) continue;
+
                             const range = document.createRange();
                             range.selectNodeContents(node);
                             const rect = range.getBoundingClientRect();
+
                             if (rect.width > 0 && rect.height > 0) {{
-                                return {{ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, found: true }};
+                                // Check if element is in viewport
+                                const isVisible = rect.top >= 0 &&
+                                                rect.left >= 0 &&
+                                                rect.bottom <= window.innerHeight &&
+                                                rect.right <= window.innerWidth;
+
+                                const match = {{
+                                    x: rect.left + rect.width / 2,
+                                    y: rect.top + rect.height / 2,
+                                    element: element,
+                                    visible: isVisible,
+                                    found: true
+                                }};
+
+                                // If visible, use immediately
+                                if (isVisible) {{
+                                    return match;
+                                }}
+
+                                // Otherwise, store as potential match
+                                if (!bestMatch) {{
+                                    bestMatch = match;
+                                }}
                             }}
                         }}
                     }}
-                    return {{ found: false }};
+
+                    return bestMatch || {{ found: false }};
                 }}
             """, target)
 
             if result.get('found'):
-                await page.mouse.click(result['x'], result['y'])
-                return {"clicked": target, "method": "trusted_mouse_click", "coordinates": {"x": result['x'], "y": result['y']}}
-            else:
-                return {"error": f"Could not find text: '{target}'"}
+                # If element is visible, click directly
+                if result.get('visible'):
+                    await page.mouse.click(result['x'], result['y'])
+                    return {"clicked": target, "method": "trusted_mouse_click", "coordinates": {"x": result['x'], "y": result['y']}}
+
+                # If not visible, scroll into view first
+                else:
+                    scroll_result = await page.evaluate(f"""
+                        (targetText) => {{
+                            const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+                            let node;
+
+                            while (node = walker.nextNode()) {{
+                                const text = node.textContent.trim();
+                                if (text === targetText || text.includes(targetText)) {{
+                                    const element = node.parentElement;
+                                    if (element) {{
+                                        // Scroll element into view
+                                        element.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
+                                        return {{ scrolled: true }};
+                                    }}
+                                }}
+                            }}
+                            return {{ scrolled: false }};
+                        }}
+                    """, target)
+
+                    if scroll_result.get('scrolled'):
+                        # Wait for scroll animation to complete
+                        await page.wait_for_timeout(500)
+
+                        # Now get new coordinates after scrolling
+                        new_result = await page.evaluate(f"""
+                            (targetText) => {{
+                                const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+                                let node;
+
+                                while (node = walker.nextNode()) {{
+                                    const text = node.textContent.trim();
+                                    if (text === targetText || text.includes(targetText)) {{
+                                        const range = document.createRange();
+                                        range.selectNodeContents(node);
+                                        const rect = range.getBoundingClientRect();
+
+                                        if (rect.width > 0 && rect.height > 0) {{
+                                            return {{
+                                                x: rect.left + rect.width / 2,
+                                                y: rect.top + rect.height / 2,
+                                                found: true
+                                            }};
+                                        }}
+                                    }}
+                                }}
+                                return {{ found: false }};
+                            }}
+                        """, target)
+
+                        if new_result.get('found'):
+                            await page.mouse.click(new_result['x'], new_result['y'])
+                            return {"clicked": target, "method": "scroll_then_click", "coordinates": {"x": new_result['x'], "y": new_result['y']}}
+
+            return {"error": f"Could not find text: '{target}'"}
+
         except Exception as e:
             return {"error": f"Click failed: {str(e)}"}
 
