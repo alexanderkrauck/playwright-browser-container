@@ -56,62 +56,33 @@ class BrowserProxy:
         
         return self.browser
     
-    async def smart_click(self, page: Page, target: str, fuzzy_threshold: float = 0.8) -> Dict:
-        """Simple text-first click with fallback to CSS selectors"""
+    async def smart_click(self, page: Page, target: str) -> Dict:
+        """Click by text or CSS selector - auto-detected"""
 
-        # If it looks like CSS selector, use old method
-        if target.startswith(('#', '.', '[')) or ':' in target:
+        # CSS selector detection
+        if target.startswith(('#', '.', '[')) or ' > ' in target or target.startswith('div[') or target.startswith('button['):
             try:
                 await page.click(target, timeout=5000)
-                return {"clicked": target, "method": "css_selector"}
+                return {"clicked": target}
             except Exception as e:
                 return {"error": f"Could not click {target}: {str(e)}"}
 
-        # Otherwise, treat as text and try our successful selectors
+        # Text-based clicking - try proven selectors
         escaped_text = target.replace('"', '\\"')
         selectors = [
-            f'div[tabindex="0"]:has-text("{escaped_text}")',  # This worked for WhatsApp
-            f'li:has-text("{escaped_text}")',                # This worked for LinkedIn
+            f'div[tabindex="0"]:has-text("{escaped_text}")',  # WhatsApp chats
+            f'li:has-text("{escaped_text}")',                # LinkedIn conversations
             f'*:has-text("{escaped_text}")',                 # General fallback
-            f'[role="button"]:has-text("{escaped_text}")',
-            f'button:has-text("{escaped_text}")',
-            f'a:has-text("{escaped_text}")'
         ]
 
         for selector in selectors:
             try:
                 await page.click(selector, timeout=2000)
-                return {"clicked": target, "method": "text_to_selector", "selector": selector}
+                return {"clicked": target}
             except:
                 continue
 
-        # Final fallback: find any element with the text and click it
-        try:
-            result = await page.evaluate(f"""
-                () => {{
-                    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-                    let node;
-                    while (node = walker.nextNode()) {{
-                        const text = node.textContent.trim().toLowerCase();
-                        if (text.includes("{target.lower()}")) {{
-                            const element = node.parentElement;
-                            if (element.offsetWidth > 0 && element.offsetHeight > 0) {{
-                                element.click();
-                                return true;
-                            }}
-                        }}
-                    }}
-                    return false;
-                }}
-            """)
-
-            if result:
-                return {"clicked": target, "method": "text_search"}
-            else:
-                return {"error": f"No clickable element found with text '{target}'"}
-
-        except Exception as e:
-            return {"error": f"Click failed: {str(e)}"}
+        return {"error": f"Could not find clickable element: '{target}'"}
 
     async def get_active_page(self) -> Page:
         """
@@ -263,8 +234,7 @@ class BrowserProxy:
             if not target:
                 raise ValueError("Target text or selector required for click")
 
-            fuzzy_threshold = kwargs.get("fuzzy_threshold", 0.8)
-            return await self.smart_click(page, target, fuzzy_threshold)
+            return await self.smart_click(page, target)
                 
         elif action == "fill":
             selector = kwargs.get("selector")
@@ -275,10 +245,6 @@ class BrowserProxy:
             await page.fill(selector, value)
             return {"filled": selector, "value": value}
             
-        elif action == "wait":
-            timeout = kwargs.get("timeout", 3000)
-            await page.wait_for_timeout(timeout)
-            return {"waited": f"{timeout}ms"}
             
         else:
             raise ValueError(f"Unknown action: {action}")
@@ -297,9 +263,8 @@ Actions:
 - evaluate: Run JavaScript and return result
 - screenshot: Capture the page
 - get_content: Get basic page text content (document.body.innerText, limited to 5000 chars). For targeted extraction of specific elements, interactive elements, or comprehensive data collection, use 'evaluate' with custom JavaScript instead.
-- click: Click an element by text content (fuzzy matched) or CSS selector
+- click: Click an element by text content or CSS selector (auto-detected)
 - fill: Fill a form field
-- wait: Wait for timeout
 
 Always operates on whatever tab the user is actually looking at.""",
                     inputSchema={
@@ -307,17 +272,15 @@ Always operates on whatever tab the user is actually looking at.""",
                         "properties": {
                             "action": {
                                 "type": "string",
-                                "enum": ["navigate", "evaluate", "screenshot", "get_content", "click", "fill", "wait"],
+                                "enum": ["navigate", "evaluate", "screenshot", "get_content", "click", "fill"],
                                 "description": "Action to perform"
                             },
                             "url": {"type": "string", "description": "URL for navigate"},
                             "expression": {"type": "string", "description": "JavaScript for evaluate"},
-                            "target": {"type": "string", "description": "Text to click (fuzzy matched) or CSS selector"},
-                            "selector": {"type": "string", "description": "CSS selector (for fill, or click fallback)"},
+                            "target": {"type": "string", "description": "Text to click or CSS selector"},
+                            "selector": {"type": "string", "description": "CSS selector for fill"},
                             "value": {"type": "string", "description": "Value for fill"},
-                            "fuzzy_threshold": {"type": "number", "description": "Fuzzy match threshold 0-1", "default": 0.8},
-                            "full_page": {"type": "boolean", "description": "Full page screenshot", "default": False},
-                            "timeout": {"type": "integer", "description": "Timeout in ms for wait", "default": 3000}
+                            "full_page": {"type": "boolean", "description": "Full page screenshot", "default": False}
                         },
                         "required": ["action"]
                     }
