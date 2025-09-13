@@ -135,14 +135,46 @@ class BrowserProxy:
             """, target)
 
             if result.get('found'):
-                await page.mouse.click(result['x'], result['y'])
-                return {
-                    "clicked": target,
-                    "method": "enhanced_smart_click",
-                    "coordinates": {"x": result['x'], "y": result['y']},
-                    "score": result.get('score', 0),
-                    "frame": result.get('frame', 'main')
-                }
+                # If element is visible, click directly
+                if result.get('visible'):
+                    await page.mouse.click(result['x'], result['y'])
+                    return {
+                        "clicked": target,
+                        "method": "enhanced_smart_click",
+                        "coordinates": {"x": result['x'], "y": result['y']},
+                        "score": result.get('score', 0),
+                        "frame": result.get('frame', 'main')
+                    }
+
+                # If not visible, scroll into view first
+                else:
+                    await page.evaluate(f"""
+                        (targetText) => {{
+                            const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+                            let node;
+                            while (node = walker.nextNode()) {{
+                                const text = node.textContent.trim();
+                                if (text === targetText || text.includes(targetText)) {{
+                                    const element = node.parentElement;
+                                    if (element) {{
+                                        element.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
+                                        return true;
+                                    }}
+                                }}
+                            }}
+                            return false;
+                        }}
+                    """, target)
+
+                    await page.wait_for_timeout(500)  # Wait for scroll
+                    await page.mouse.click(result['x'], result['y'])  # Use original coordinates
+                    return {
+                        "clicked": target,
+                        "method": "enhanced_smart_click_with_scroll",
+                        "coordinates": {"x": result['x'], "y": result['y']},
+                        "score": result.get('score', 0),
+                        "frame": result.get('frame', 'main')
+                    }
 
             return {"error": f"Could not find text: '{target}'"}
 
