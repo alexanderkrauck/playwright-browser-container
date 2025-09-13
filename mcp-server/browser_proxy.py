@@ -252,9 +252,13 @@ class BrowserProxy:
 
             # Execute Playwright script with page context
             try:
-                # Create a safe execution context
+                # Create a safe execution context with proper indentation
                 local_vars = {"page": page}
-                result = await eval(f"async def _exec(): {script}\n_exec()", {"__builtins__": {}, "page": page}, local_vars)()
+                exec_code = f"""async def _exec():
+{chr(10).join('    ' + line for line in script.strip().split(chr(10)))}
+result = await _exec()"""
+                exec(exec_code, {"__builtins__": {}, "page": page}, local_vars)
+                result = local_vars.get('result')
                 return {"result": result, "executed": True}
             except Exception as e:
                 return {"error": f"Playwright script failed: {str(e)}"}
