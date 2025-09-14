@@ -13,7 +13,8 @@ services:
     volumes:
       - ./data:/data
       - ./mcp-server:/mcp-server:ro
-      - chrome-downloads:/root/Downloads
+      - ./config:/config:ro
+      - /root:/root
     restart: unless-stopped
     shm_size: '2gb'  # Shared memory for Chrome
     cap_add:
@@ -23,8 +24,6 @@ services:
 
 volumes:
   browser-data:
-    driver: local
-  chrome-downloads:
     driver: local
 
 networks:
