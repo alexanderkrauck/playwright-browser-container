@@ -1,13 +1,23 @@
 #!/bin/bash
-# Auto-deploy script for playwright-browser-container
+# Generic auto-deploy script for Docker Compose projects
 # Triggers on local git commits to rebuild and restart Docker container
 
 set -e
 
-# Configuration
+# Auto-detect project configuration
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+PROJECT_NAME="$(basename "$PROJECT_DIR")"
 BRANCH=${1:-$(git rev-parse --abbrev-ref HEAD)}
-PROJECT_DIR="/root/goedlike/playwright-browser-container"
-CONTAINER_NAME="playwright-browser"
+
+# Auto-detect container name from docker-compose.yml
+if [ -f "$PROJECT_DIR/docker-compose.yml" ]; then
+    # Try to extract service name from docker-compose.yml
+    CONTAINER_NAME=$(grep -E "^\s+[a-zA-Z0-9_-]+:" "$PROJECT_DIR/docker-compose.yml" | head -1 | sed 's/[[:space:]]*\([^:]*\):.*/\1/' || echo "$PROJECT_NAME")
+else
+    CONTAINER_NAME="$PROJECT_NAME"
+fi
+
 LOG_DIR="$PROJECT_DIR/.ci/logs"
 LOG_FILE="$LOG_DIR/deploy-$(date +%Y%m%d-%H%M%S).log"
 TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S")
@@ -23,7 +33,9 @@ log() {
 # Start logging
 {
     log "========================================="
-    log "Auto-deployment started for branch: $BRANCH"
+    log "Auto-deployment started for $PROJECT_NAME"
+    log "Branch: $BRANCH"
+    log "Container: $CONTAINER_NAME"
     log "========================================="
     
     # Load configuration if exists
@@ -44,22 +56,22 @@ log() {
     case $BRANCH in
         main|master)
             CONTAINER_SUFFIX=""
-            COMPOSE_PROJECT_NAME="playwright-browser-prod"
+            COMPOSE_PROJECT_NAME="${PROJECT_NAME}-prod"
             log "Deploying to PRODUCTION environment"
             ;;
         develop|development)
             CONTAINER_SUFFIX="-dev"
-            COMPOSE_PROJECT_NAME="playwright-browser-dev"
+            COMPOSE_PROJECT_NAME="${PROJECT_NAME}-dev"
             log "Deploying to DEVELOPMENT environment"
             ;;
         staging)
             CONTAINER_SUFFIX="-staging"
-            COMPOSE_PROJECT_NAME="playwright-browser-staging"
+            COMPOSE_PROJECT_NAME="${PROJECT_NAME}-staging"
             log "Deploying to STAGING environment"
             ;;
         *)
             CONTAINER_SUFFIX="-$BRANCH"
-            COMPOSE_PROJECT_NAME="playwright-browser-$BRANCH"
+            COMPOSE_PROJECT_NAME="${PROJECT_NAME}-$BRANCH"
             log "Deploying to CUSTOM environment: $BRANCH"
             ;;
     esac
@@ -122,18 +134,32 @@ log() {
         CONTAINER_STATUS=$(docker inspect -f '{{.State.Status}}' "$CONTAINER_ID")
         if [ "$CONTAINER_STATUS" = "running" ]; then
             log "✓ Container is running"
-            
-            # Check if services are responding
-            if curl -s -o /dev/null -w "%{http_code}" http://localhost:6080 | grep -q "200\|301\|302"; then
-                log "✓ noVNC interface is responding"
-            else
-                log "⚠ noVNC interface is not responding (this might be normal during startup)"
-            fi
-            
-            if curl -s -o /dev/null -w "%{http_code}" http://localhost:8931 | grep -q "200\|404"; then
-                log "✓ Playwright MCP endpoint is responding"
-            else
-                log "⚠ Playwright MCP endpoint is not responding (this might be normal during startup)"
+
+            # Auto-detect exposed ports from docker-compose.yml and run health checks
+            if [ -f "$PROJECT_DIR/docker-compose.yml" ]; then
+                # Extract external ports from port mappings like "8000:8000" or "\"8000:8000\""
+                PORTS=$(grep -oE '[-"]*[0-9]+:[0-9]+' "$PROJECT_DIR/docker-compose.yml" | sed 's/[^0-9]*\([0-9]*\):.*/\1/' | sort -u || true)
+
+                for port in $PORTS; do
+                    if [ -n "$port" ] && [ "$port" -gt 0 ] 2>/dev/null; then
+                        if curl -s -o /dev/null -w "%{http_code}" "http://localhost:$port" | grep -q "200\|301\|302\|404"; then
+                            log "✓ Service on port $port is responding"
+                        else
+                            log "⚠ Service on port $port is not responding (this might be normal during startup)"
+                        fi
+                    fi
+                done
+
+                # Use configured health check URLs if available
+                if [ -n "$HEALTH_CHECK_URLS" ]; then
+                    for url in $HEALTH_CHECK_URLS; do
+                        if curl -s -o /dev/null -w "%{http_code}" "$url" | grep -q "200\|301\|302\|404"; then
+                            log "✓ Health check URL $url is responding"
+                        else
+                            log "⚠ Health check URL $url is not responding"
+                        fi
+                    done
+                fi
             fi
         else
             log "✗ Container is not running properly. Status: $CONTAINER_STATUS"
@@ -153,17 +179,18 @@ log() {
     # Summary
     log "========================================="
     log "✓ Deployment completed successfully!"
+    log "Project: $PROJECT_NAME"
     log "Branch: $BRANCH"
     log "Commit: $COMMIT_HASH"
     log "Container: $CONTAINER_NAME"
     log "Status: Running"
     log "========================================="
-    
+
 } 2>&1 | tee -a "$LOG_FILE"
 
 # Send notification (optional - uncomment if you want desktop notifications)
 # if command -v notify-send >/dev/null 2>&1; then
-#     notify-send "Playwright Container Deployed" "Branch: $BRANCH\nCommit: $COMMIT_HASH"
+#     notify-send "$PROJECT_NAME Container Deployed" "Branch: $BRANCH\nCommit: $COMMIT_HASH"
 # fi
 
 exit 0

@@ -1,89 +1,133 @@
-# Local CI/CD for Playwright Browser Container
+# Generic Auto-Deployment CI for Docker Compose Projects
 
-This directory contains the local CI/CD automation for the playwright-browser-container project.
+This directory contains scripts for automated deployment of any Docker Compose project when changes are made to the repository.
 
-## Overview
+## Features
 
-When you commit to specific branches locally, the system automatically:
-1. Detects the commit via Git hook
-2. Rebuilds the Docker image
-3. Stops the old container
-4. Starts the new container with the updated code
+- **🚀 Fully Generic**: Works with any Docker Compose project
+- **🔍 Auto-Detection**: Automatically detects project name, container names, and ports
+- **🌍 Multi-Environment**: Supports prod/dev/staging environments
+- **💚 Health Checks**: Automatic service health verification
+- **📝 Comprehensive Logging**: Detailed deployment logs with timestamps
+- **🔄 Smart Cleanup**: Configurable image retention and cleanup
 
-## Configured Branches
+## Files
 
-By default, the following branches trigger auto-deployment:
-- `main` / `master` - Production environment
-- `develop` / `development` - Development environment  
-- `staging` - Staging environment
+### `auto-deploy.sh`
+Main deployment script that:
+- Auto-detects project configuration from directory structure
+- Rebuilds Docker containers using docker-compose
+- Restarts services with zero-downtime deployment
+- Performs automatic health checks on exposed ports
+- Logs all deployment activities with timestamps
 
-## How It Works
+### `config.env`
+Configuration file with deployment settings:
+- Branch deployment rules
+- Health check endpoints (auto-detected if not specified)
+- Container settings and cleanup policies
+- Logging and notification preferences
 
-1. **Git Hook** (`.git/hooks/post-commit`)
-   - Triggers after every local commit
-   - Checks if the branch should trigger deployment
-   - Runs the deployment script in the background
+## Quick Start
 
-2. **Deployment Script** (`auto-deploy.sh`)
-   - Builds the new Docker image
-   - Gracefully stops the old container
-   - Starts the new container
-   - Performs health checks
-   - Logs everything to `.ci/logs/`
+1. **Copy the `.ci` directory** to your Docker Compose project root
+2. **Make the script executable**: `chmod +x .ci/auto-deploy.sh`
+3. **Deploy**: `./.ci/auto-deploy.sh`
 
-3. **Configuration** (`config.env`)
-   - Customize which branches trigger deployment
-   - Configure build options
-   - Set health check parameters
+That's it! The script will auto-detect your project configuration.
 
 ## Usage
 
-### Normal Workflow
-```bash
-# Make your changes
-vim Dockerfile
-
-# Commit to a configured branch
-git add .
-git commit -m "Update Dockerfile"
-
-# Auto-deployment starts automatically!
-# Check the logs
-tail -f .ci/logs/deploy-*.log
-```
-
 ### Manual Deployment
 ```bash
-# If you need to manually trigger deployment
-.ci/auto-deploy.sh [branch-name]
+# Deploy current branch
+./.ci/auto-deploy.sh
+
+# Deploy specific branch
+./.ci/auto-deploy.sh main
 ```
 
-### Configuration
+### Automatic Deployment
+The script can be triggered automatically via:
+- Git hooks (post-commit, post-receive)
+- CI/CD pipelines (GitHub Actions, GitLab CI)
+- Cron jobs for scheduled deployments
+- File watchers for development
 
-Edit `.ci/config.env` to customize:
-- Which branches trigger deployment
-- Number of old images to keep
-- Health check URLs
-- Logging verbosity
+## Auto-Detection Features
 
-### Monitoring
+The script automatically detects:
+- **Project Name**: From directory name
+- **Container Names**: From docker-compose.yml service names
+- **Health Check Ports**: From docker-compose.yml port mappings
+- **Environment**: Based on git branch
 
-#### Check Deployment Logs
-```bash
-# View latest deployment log
-ls -lt .ci/logs/ | head -2
+## Configuration
 
-# Watch deployment in real-time
-tail -f .ci/logs/deploy-*.log
+Edit `config.env` to customize:
+- Which branches trigger deployment (`DEPLOY_ON_BRANCHES`)
+- Health check URLs (`HEALTH_CHECK_URLS`)
+- Docker build options (`DOCKER_BUILD_NO_CACHE`, `DOCKER_BUILD_PULL`)
+- Image cleanup policy (`KEEP_OLD_IMAGES`)
+- Logging and notification settings
+
+## Logs
+
+Deployment logs are stored in `.ci/logs/` with timestamps:
+- `deploy-YYYYMMDD-HHMMSS.log`
+- Includes build output, deployment status, and health checks
+- Configurable retention period
+
+## Health Checks
+
+After deployment, the script automatically:
+1. Verifies containers are running
+2. Tests all exposed ports from docker-compose.yml
+3. Checks custom health check URLs (if configured)
+4. Reports service availability
+
+## Environment Support
+
+Supports multiple environments based on git branch:
+- `main/master` → Production environment
+- `develop/development` → Development environment
+- `staging` → Staging environment
+- Other branches → Custom environments with branch suffix
+
+## Example docker-compose.yml Support
+
+Works with any docker-compose.yml structure:
+```yaml
+services:
+  web:
+    build: .
+    ports:
+      - "8000:8000"  # Auto-detected for health checks
+
+  api:
+    build: ./api
+    ports:
+      - "3000:3000"  # Auto-detected for health checks
 ```
 
-#### Check Container Status
-```bash
-# See if container is running
-docker ps | grep playwright-browser
+## Integration Examples
 
-# Check container logs
-docker logs playwright-browser
+### Git Hook (post-commit)
+```bash
+#!/bin/bash
+./.ci/auto-deploy.sh
+```
+
+### GitHub Actions
+```yaml
+- name: Deploy
+  run: ./.ci/auto-deploy.sh
+```
+
+### Cron Job
+```bash
+# Deploy every 5 minutes if changes detected
+*/5 * * * * cd /path/to/project && git pull && ./.ci/auto-deploy.sh
 ```
 
 ## Troubleshooting
@@ -91,7 +135,7 @@ docker logs playwright-browser
 ### Deployment Not Triggering
 1. Check current branch: `git branch --show-current`
 2. Verify branch is in config: `grep DEPLOY_ON_BRANCHES .ci/config.env`
-3. Check hook is executable: `ls -la .git/hooks/post-commit`
+3. Check script is executable: `ls -la .ci/auto-deploy.sh`
 
 ### Build Failures
 1. Check deployment logs in `.ci/logs/`
@@ -99,22 +143,36 @@ docker logs playwright-browser
 3. Check Docker daemon: `systemctl status docker`
 
 ### Container Not Starting
-1. Check port conflicts: `ss -tulpn | grep -E "6080|8931"`
+1. Check port conflicts: `ss -tulpn | grep [PORT]`
 2. Review docker-compose.yml configuration
-3. Check Docker logs: `docker logs playwright-browser`
+3. Check Docker logs: `docker logs [CONTAINER_NAME]`
 
-## Disable Auto-Deployment
+## Advanced Configuration
 
-To temporarily disable:
+### Custom Health Checks
 ```bash
-# Rename the hook
-mv .git/hooks/post-commit .git/hooks/post-commit.disabled
+# In config.env
+HEALTH_CHECK_URLS="http://localhost:8000/health http://localhost:3000/api/status"
 ```
 
-To re-enable:
+### Branch-Specific Settings
 ```bash
-# Restore the hook
-mv .git/hooks/post-commit.disabled .git/hooks/post-commit
+# In config.env - customize per branch
+case "$BRANCH" in
+    main|master)
+        export CUSTOM_ENV_VAR="production"
+        ;;
+    develop)
+        export CUSTOM_ENV_VAR="development"
+        ;;
+esac
+```
+
+### Notification Integration
+```bash
+# In config.env - uncomment to enable
+# SLACK_WEBHOOK_URL="https://hooks.slack.com/..."
+# EMAIL_ON_FAILURE="admin@example.com"
 ```
 
 ## Clean Up
@@ -127,33 +185,6 @@ find .ci/logs -name "*.log" -mtime +30 -delete
 
 ### Clean Docker Images
 ```bash
-# Remove unused images
+# Remove unused images (configured via KEEP_OLD_IMAGES)
 docker image prune -f
-
-# Remove all stopped containers
-docker container prune -f
 ```
-
-## Advanced Features
-
-### Multi-Branch Deployment
-Different branches can deploy to different ports/configurations by modifying the `auto-deploy.sh` script.
-
-### Health Checks
-The system performs basic health checks on:
-- noVNC interface (port 6080)
-- Playwright MCP endpoint (port 8931)
-
-### Rollback
-Keep old images for quick rollback:
-```bash
-# List available images
-docker images | grep playwright-browser
-
-# Run previous version
-docker run -d --name playwright-browser-rollback [IMAGE_ID]
-```
-
-## Support
-
-Check logs in `.ci/logs/` for detailed deployment information and troubleshooting.
