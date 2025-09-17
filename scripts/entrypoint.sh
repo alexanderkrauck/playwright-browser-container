@@ -15,6 +15,7 @@ fi
 # Create necessary directories
 mkdir -p /var/log/supervisor
 mkdir -p /data/chrome-profile
+mkdir -p /data/chrome-profile/Default
 mkdir -p /root/Downloads
 mkdir -p /root/.playwright-browser-data
 
@@ -26,6 +27,13 @@ rm -rf /tmp/.com.google.Chrome.*
 # Set proper permissions
 chmod -R 755 /var/log/supervisor
 chmod -R 755 /data
+chmod -R 777 /root/Downloads
+
+# Setup Chrome preferences for downloads
+if [ -f /config/chrome-preferences.json ]; then
+    echo "Setting up Chrome download preferences..."
+    cp /config/chrome-preferences.json /data/chrome-profile/Default/Preferences 2>/dev/null || true
+fi
 
 # Check if noVNC files exist
 if [ ! -f /usr/share/novnc/vnc.html ]; then

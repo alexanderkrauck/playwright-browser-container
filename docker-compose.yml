@@ -15,7 +15,7 @@ services:
       - ./mcp-server:/mcp-server:ro
       - ./config:/config:ro
       - /root:/root
-    restart: unless-stopped
+    restart: always
     shm_size: '2gb'  # Shared memory for Chrome
     cap_add:
       - SYS_ADMIN  # Required for Chrome sandbox in some cases

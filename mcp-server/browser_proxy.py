@@ -223,6 +223,9 @@ class BrowserProxy:
                 
                 if is_active:
                     self.logger.debug(f"Active page: {page.url}")
+                    # Set Munich geolocation for every active page
+                    await page.context.set_geolocation({"latitude": 48.1351, "longitude": 11.5820, "accuracy": 100})
+                    await page.context.grant_permissions(["geolocation"])
                     return page
                     
             except Exception:
