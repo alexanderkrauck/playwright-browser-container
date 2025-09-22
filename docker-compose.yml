@@ -21,6 +21,12 @@ services:
       - SYS_ADMIN  # Required for Chrome sandbox in some cases
     networks:
       - playwright-net
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
 
 volumes:
   browser-data:
