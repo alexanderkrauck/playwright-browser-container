@@ -5,8 +5,8 @@ services:
     build: .
     container_name: playwright-browser
     ports:
-      - "6080:6080"  # noVNC web interface
-      - "8931:8931"  # Playwright MCP HTTP/SSE endpoint
+      - "127.0.0.1:6080:6080"  # noVNC web interface - localhost only
+      - "127.0.0.1:8931:8931"  # Playwright MCP HTTP/SSE endpoint - localhost only
     environment:
       - DISPLAY=:99
       - RESOLUTION=1920x1080
