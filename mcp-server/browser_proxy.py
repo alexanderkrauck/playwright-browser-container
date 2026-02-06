@@ -333,21 +333,35 @@ class BrowserProxy:
             
         elif action == "screenshot":
             import base64
+            from PIL import Image
+            from io import BytesIO
             
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            path = kwargs.get("path", f"screenshot_{timestamp}.png")
-            full_page = kwargs.get("full_page", False)
+            path = kwargs.get("path", f"screenshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png")
+            screenshot_data = await page.screenshot(full_page=kwargs.get("full_page", False))
             
-            screenshot_data = await page.screenshot(full_page=full_page)
+            # Resize if exceeds Claude's 8000px limit
+            img = Image.open(BytesIO(screenshot_data))
+            w, h = img.size
+            MAX = 8000
+            resized = w > MAX or h > MAX
             
-            # Convert to base64 for ImageContent
-            base64_data = base64.b64encode(screenshot_data).decode('utf-8')
+            if resized:
+                scale = MAX / max(w, h)
+                img = img.resize((int(w * scale), int(h * scale)), Image.Resampling.LANCZOS)
+                buf = BytesIO()
+                img.save(buf, format="PNG", optimize=True)
+                screenshot_data = buf.getvalue()
             
-            # Also save to file for reference
             with open(path, "wb") as f:
                 f.write(screenshot_data)
             
-            return {"base64": base64_data, "path": path, "size": len(screenshot_data)}
+            return {
+                "base64": base64.b64encode(screenshot_data).decode('utf-8'),
+                "path": path,
+                "size": len(screenshot_data),
+                "dimensions": {"width": img.size[0], "height": img.size[1]},
+                "resized": resized
+            }
             
         elif action == "get_content":
             # Get the page's text content
@@ -524,11 +538,12 @@ async def _exec_playwright():
 
                 elif name == "browser_screenshot":
                     result = await self.execute_on_active_tab("screenshot", **arguments)
-                    return [ImageContent(
-                        type="image",
-                        data=result["base64"],
-                        mimeType="image/png"
-                    )]
+                    img = ImageContent(type="image", data=result["base64"], mimeType="image/png")
+                    if result.get("resized"):
+                        d = result["dimensions"]
+                        info = f"ℹ️  Resized to {d['width']}×{d['height']}px ({result['size']//1024}KB) for Claude's 8000px limit"
+                        return [TextContent(type="text", text=info), img]
+                    return [img]
 
                 elif name == "browser_get_content":
                     result = await self.execute_on_active_tab("get_content", **arguments)
