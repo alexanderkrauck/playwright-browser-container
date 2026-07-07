@@ -22,6 +22,7 @@ The official Playwright MCP server is broad by design. It exposes tools for navi
 
 The narrower design here is motivated by three observations:
 
+- Gan and Sun's RAG-MCP paper studies MCP tool selection directly. In their benchmark, prompting with all MCP descriptions reached 13.62% tool selection accuracy, while retrieving a focused subset reached 43.13% and reduced average prompt tokens from 2133.84 to 1084.00.
 - OpenAI recommends keeping the number of initially available functions small for higher accuracy and suggests fewer than 20 functions at the start of a turn.
 - Anthropic notes that too many or overlapping tools can distract agents and increase tool-use mistakes.
 - Microsoft's own Playwright MCP README says coding agents may benefit from CLI plus skills because they avoid loading large tool schemas and verbose accessibility trees into model context.
@@ -147,6 +148,7 @@ Security note: do not expose this container on an untrusted network. Browser aut
 
 ## References
 
+- [Gan and Sun: RAG-MCP: Mitigating Prompt Bloat in LLM Tool Selection via Retrieval-Augmented Generation](https://arxiv.org/abs/2505.03275)
 - [OpenAI function calling best practices](https://developers.openai.com/api/docs/guides/function-calling)
 - [Anthropic: Writing effective tools for AI agents](https://www.anthropic.com/engineering/writing-tools-for-agents)
 - [Microsoft Playwright MCP README](https://github.com/microsoft/playwright-mcp)
