@@ -1,51 +1,85 @@
 # Playwright Browser Container
 
-A Docker container that provides a browser environment with Playwright MCP server, accessible via VNC and HTTP/SSE.
+Containerized browser automation environment with Chrome, Playwright MCP, persistent browser profiles, VNC/noVNC access, and HTTP/SSE connectivity.
 
-## Features
+This project isolates browser automation into a reproducible container so agent workflows can use a real browser without depending on a developer's local desktop state.
 
-- 🖥️ Virtual display (Xvfb) with configurable resolution
-- 🌐 Chrome/Chromium browser with persistent profile
-- 🔧 Playwright MCP server accessible via HTTP/SSE
-- 👁️ VNC access through noVNC web interface
-- 📦 All-in-one containerized solution
+## Why I Built It
+
+Browser automation is useful for AI workflows, but local browser state is messy. Profiles, cookies, display state, downloads, and browser versions can all affect behavior. For long-running agent workflows, the browser should be a controlled service boundary, not an implicit dependency on someone's machine.
+
+A second motivation was tool-surface control. General-purpose browser MCP servers expose many browser actions because they need to cover every common interaction. That flexibility is useful, but for coding agents it can be expensive: every loaded tool schema and every verbose accessibility snapshot consumes context and increases the chance that the model chooses the wrong tool.
+
+This project is intentionally narrower. The goal is a containerized browser service with persistent state, visual handoff, and a smaller operational interface for the workflows I actually needed.
+
+The design is based on a simple premise: for agent workflows, fewer high-signal tools are often better than a broad low-level browser API.
+
+## Design Rationale: Smaller Tool Surface
+
+This project is not a replacement for Playwright. It is an opinionated browser runtime for agent workflows.
+
+The official Playwright MCP server is broad by design. It exposes tools for navigation, clicking, typing, screenshots, keyboard and mouse input, dialogs, tabs, network inspection, storage state, and arbitrary Playwright code execution. That is useful for general automation, but it also creates a large decision surface for an LLM.
+
+The narrower design here is motivated by three observations:
+
+- OpenAI recommends keeping the number of initially available functions small for higher accuracy and suggests fewer than 20 functions at the start of a turn.
+- Anthropic notes that too many or overlapping tools can distract agents and increase tool-use mistakes.
+- Microsoft's own Playwright MCP README says coding agents may benefit from CLI plus skills because they avoid loading large tool schemas and verbose accessibility trees into model context.
+
+In practice, this means the browser layer should expose the smallest set of operations needed for the task, keep persistent session state outside the model, and allow visual human takeover when the agent hits authentication, CAPTCHAs, or ambiguous UI states.
+
+## Key Technical Points
+
+- Chrome/Chromium inside a Docker container
+- Playwright MCP server exposed over HTTP/SSE
+- Virtual display through Xvfb
+- VNC/noVNC access for visual inspection
+- Persistent browser profile volume
+- Downloads volume
+- Supervisor-managed services
+- Optional Chrome DevTools port
+
+## Architecture
+
+```text
+playwright-browser-container/
+├── Dockerfile
+├── docker-compose.yml
+├── config/
+│   ├── supervisord.conf
+│   ├── chrome-preferences.json
+│   └── browser-viewer.html
+├── mcp-server/
+└── scripts/
+```
+
+Runtime services:
+
+1. `Xvfb` - virtual display
+2. `x11vnc` - VNC server
+3. `websockify` - WebSocket bridge for noVNC
+4. `Playwright MCP` - browser automation interface
+5. `Chrome` - browser instance with persistent profile
 
 ## Quick Start
 
-### Build and Run
-
 ```bash
-# Build the container
-docker-compose build
-
-# Start the container
-docker-compose up -d
-
-# View logs
-docker-compose logs -f
+docker compose build
+docker compose up -d
+docker compose logs -f
 ```
 
-### Access Points
+Access points:
 
-- **VNC Web Interface**: http://localhost:6080/browser-viewer.html
-- **Playwright MCP Endpoint**: http://localhost:8931
-- **Chrome DevTools**: http://localhost:9222 (optional, for debugging)
+```text
+VNC web UI:        http://localhost:6080/browser-viewer.html
+Playwright MCP:   http://localhost:8931
+Chrome DevTools:  http://localhost:9222
+```
 
-## Configuration
+## Claude/Codex MCP Configuration
 
-### Environment Variables
-
-- `DISPLAY`: Display number (default: `:99`)
-- `RESOLUTION`: Screen resolution (default: `1920x1080`)
-
-### Volumes
-
-- `browser-data`: Persistent browser profile and data
-- `chrome-downloads`: Downloads directory
-
-## Claude Code Integration
-
-Update your Claude Code configuration to use the HTTP endpoint:
+Example MCP configuration:
 
 ```json
 {
@@ -58,36 +92,24 @@ Update your Claude Code configuration to use the HTTP endpoint:
 }
 ```
 
-Or in `.claude.json`:
+Some clients expect the `/mcp` path:
 
 ```json
-"playwright": {
-  "type": "http",
-  "url": "http://localhost:8931/mcp"
+{
+  "mcpServers": {
+    "playwright": {
+      "type": "http",
+      "url": "http://localhost:8931/mcp"
+    }
+  }
 }
 ```
 
-## Architecture
-
-The container runs multiple services managed by supervisor:
-
-1. **Xvfb**: Virtual framebuffer X server
-2. **x11vnc**: VNC server for remote display access
-3. **websockify**: WebSocket to TCP proxy for noVNC
-4. **Playwright MCP**: MCP server for browser automation
-5. **Chrome**: Browser instance (optional, for idle state)
-
-## Development
-
-### Building Locally
+## Run Without Compose
 
 ```bash
 docker build -t playwright-browser .
-```
 
-### Running Without Compose
-
-```bash
 docker run -d \
   -p 6080:6080 \
   -p 8931:8931 \
@@ -98,28 +120,34 @@ docker run -d \
 
 ## Troubleshooting
 
-### Check Service Status
+Check service status:
 
 ```bash
 docker exec playwright-browser supervisorctl status
 ```
 
-### View Logs
+View logs:
 
 ```bash
-# All logs
-docker-compose logs
-
-# Specific service logs
+docker compose logs
 docker exec playwright-browser tail -f /var/log/supervisor/playwright-mcp.log
 ```
 
-### Test MCP Connection
+Test MCP health:
 
 ```bash
 curl http://localhost:8931/health
 ```
 
-## License
+## Status
 
-MIT
+Infrastructure prototype for browser-backed agent workflows. Intended for local and controlled environments, not as an exposed public browser service.
+
+Security note: do not expose this container on an untrusted network. Browser automation infrastructure can hold cookies, account sessions, downloads, and privileged execution paths.
+
+## References
+
+- [OpenAI function calling best practices](https://developers.openai.com/api/docs/guides/function-calling)
+- [Anthropic: Writing effective tools for AI agents](https://www.anthropic.com/engineering/writing-tools-for-agents)
+- [Microsoft Playwright MCP README](https://github.com/microsoft/playwright-mcp)
+- [Playwright MCP documentation](https://playwright.dev/docs/getting-started-mcp)
